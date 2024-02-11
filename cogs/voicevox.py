@@ -12,6 +12,7 @@ import requests
 import asyncio
 import time
 from datetime import datetime, timedelta
+from collections import defaultdict
 
 import discord
 from discord.ext import commands
@@ -37,7 +38,7 @@ class SelectSpeakerView(discord.ui.View):
             "青山龍星（ノーマル）": 13,
             "青山龍星（囁き）": 86,
             "青山龍星（しっとり）": 84,
-            # "西村博之": 100,
+            "西村博之": 100,
         }
         self.waiter = asyncio.Event()
 
@@ -69,20 +70,20 @@ class SelectSpeakerView(discord.ui.View):
 class VoiceVox(commands.Cog, name="voicevox"):
     def __init__(self, bot) -> None:
         self.bot = bot
-        self.voice_client = None
-        self.text_input_channel = None
-        self.speaker_id = 3
-        self.speaker = "ずんだもん（ノーマル）"
-        # self.user_to_speaker_id = {}
+        self.server_to_voice_client = defaultdict(lambda: None)
+        self.server_to_text_input_channel = defaultdict(lambda: None)
+        self.server_to_speaker_id = defaultdict(lambda: 3)
+        self.server_to_speaker = defaultdict(lambda: "ずんだもん（ノーマル）")
+        self.server_to_user_channel = defaultdict(lambda: None)
 
-    def post_audio_query(self, text: str, speaker: int) -> str:
+    def _post_audio_query(self, text: str, speaker: int) -> str:
         """
         Posts a query to the VoiceVox API and returns the audio URL.
 
         :param text: The text to post to the API.
         :param speaker: The speaker ID to use.
         """
-        post_url = "https://c6b5-125-12-117-6.ngrok-free.app/audio_query"
+        post_url = "https://4dde-125-12-117-6.ngrok-free.app/audio_query"
         post_data = {
             "text": text,
             "speaker": speaker,
@@ -90,27 +91,26 @@ class VoiceVox(commands.Cog, name="voicevox"):
         response = requests.post(post_url, params=post_data)
         return response.json()
 
-    def post_synthesis(self, data: dict, speaker: int) -> bytes:
+    def _post_synthesis(self, data: dict, speaker: int) -> bytes:
         """
         Posts a synthesis to the VoiceVox API and returns the audio URL.
 
         :param data: The data to post to the API.
         :param speaker: The speaker ID to use.
         """
-        post_url = "https://c6b5-125-12-117-6.ngrok-free.app/synthesis"
+        post_url = "https://4dde-125-12-117-6.ngrok-free.app/synthesis"
         post_data = {
             "speaker": speaker,
         }
         response = requests.post(post_url, params=post_data, json=data)
         return response.content
 
-    def generate_hiroyuki_audio(self, text: str) -> str:
+    def _generate_hiroyuki_audio(self, text: str) -> str:
         """
         Generates an audio file using the Hiroyuki speaker.
 
         :param text: The text to generate the audio file from.
         """
-
         driver = self.bot.driver
         download_dir = self.bot.download_dir
         for filename in os.listdir(download_dir):
@@ -126,6 +126,8 @@ class VoiceVox(commands.Cog, name="voicevox"):
         self.bot.logger.info("[HIROYUKI] Starting audio download.")
         download_button = driver.find_element(By.XPATH, "/html/body/div/div[1]/div/div[1]/div[4]/div/div[2]/button[2]")
         download_button.click()
+        while len(os.listdir(download_dir)) == 0:
+            time.sleep(1)
         self.bot.logger.info("[HIROYUKI] Download finished.")
         driver.save_screenshot(f"img/{str(datetime.now())}.png")  # Save a screenshot for debug
         start_time = datetime.now()
@@ -139,13 +141,13 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 continue
         return f"{download_dir}/audio.wav"
 
-    def save_tempfile(self, text: str, speaker: int) -> str:
+    def _save_tempfile(self, text: str, speaker: int) -> str:
         if speaker == 100:  # Hiroyuki
-            file_path = self.generate_hiroyuki_audio(text)
+            file_path = self._generate_hiroyuki_audio(text)
             return file_path
         else:
-            text_data = self.post_audio_query(text, speaker)
-            audio_data = self.post_synthesis(text_data, speaker)
+            text_data = self._post_audio_query(text, speaker)
+            audio_data = self._post_synthesis(text_data, speaker)
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(audio_data)
                 file_path = f.name
@@ -160,20 +162,25 @@ class VoiceVox(commands.Cog, name="voicevox"):
         """
         if message.author.bot:
             return
-        if message.channel != self.text_input_channel:
+        if message.channel != self.server_to_text_input_channel[message.guild.id]:
             return
-        if message.content.startswith(self.bot.config["prefix"] or "/"):
+        if message.content.startswith(self.bot.config["prefix"]):
+            return
+        if message.content.startswith("/"):
             return
         if message.content.startswith("https://") or message.content.startswith("http://"):
             return
 
-        speaker_to_use = self.speaker_id
+        speaker_to_use = self.server_to_speaker_id[message.guild.id]
+
+        voice_client = self.server_to_voice_client[message.guild.id]
+
         if message.author.id == 848533749708357666:  # For Briki#2549
             speaker_to_use = 14
 
-        path = self.save_tempfile(message.content, speaker_to_use)  # current implementation
+        path = self._save_tempfile(message.content, speaker_to_use)  # current implementation
         print(f"[VoiceVox] Input query text: {message.content}")
-        self.voice_client.play(discord.FFmpegPCMAudio(path))
+        voice_client.play(discord.FFmpegPCMAudio(path))
 
     @commands.hybrid_command(
         name="join",
@@ -190,11 +197,12 @@ class VoiceVox(commands.Cog, name="voicevox"):
             await context.reply("You are not connected to a voice channel.")
             return
 
-        self.text_input_channel = context.channel
-        self.voice_client = await user.voice.channel.connect()
+        self.server_to_text_input_channel[context.guild.id] = context.channel
+        self.server_to_voice_client[context.guild.id] = await user.voice.channel.connect()
+        self.server_to_user_channel[context.guild.id] = user.voice.channel
         latency = self.bot.latency * 1000
         embed = discord.Embed(
-            title=f"VoiceVox Bot: {self.speaker}",
+            title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
             description=(f"Joined {user.voice.channel.mention} (Ping: {latency:.0f}ms)"),
             color=0x00FF00,
         )
@@ -210,12 +218,14 @@ class VoiceVox(commands.Cog, name="voicevox"):
 
         :param context: The application command context.
         """
-        if self.voice_client is None:
-            await context.reply("You are not connected to a voice channel.")
+        voice_client = self.server_to_voice_client[context.guild.id]
+        if voice_client is None:
+            await context.reply("VoiceVox Bot is not connected to a voice channel.")
             return
-        await context.reply(f"Leaving {context.channel.mention} 👋")
-        await self.voice_client.disconnect()
-        self.text_input_channel = None
+        else:
+            await context.reply(f"Leaving {voice_client.channel.mention} 👋")
+            await voice_client.disconnect()
+            self.server_to_text_input_channel[context.guild.id] = None
 
     @commands.hybrid_command(
         name="change",
@@ -235,9 +245,8 @@ class VoiceVox(commands.Cog, name="voicevox"):
             )
         await context.send(view=view)
         await view.waiter.wait()
-        self.speaker_id = view.selected_speaker_id
-        self.speaker = view.selected_speaker
-        # print("speaker_id: ", self.speaker_id)
+        self.server_to_speaker_id[context.guild.id] = view.selected_speaker_id
+        self.server_to_speaker[context.guild.id] = view.selected_speaker
 
     @commands.hybrid_command(
         name="speaker",
@@ -252,7 +261,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
         user = context.author
         latency = self.bot.latency * 1000
         embed = discord.Embed(
-            title=f"VoiceVox Bot: {self.speaker}",
+            title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
             description=(f"Joined {user.voice.channel.mention} (Ping: {latency:.0f}ms)"),
             color=0x00FF00,
         )
