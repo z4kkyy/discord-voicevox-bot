@@ -75,6 +75,8 @@ class VoiceVox(commands.Cog, name="voicevox"):
         self.server_to_speaker_id = defaultdict(lambda: 3)
         self.server_to_speaker = defaultdict(lambda: "ずんだもん（ノーマル）")
         self.server_to_user_channel = defaultdict(lambda: None)
+        self.server_to_audio_queue = defaultdict(asyncio.Queue)
+        self.server_to_if_playing = defaultdict(lambda: False)
 
     def _post_audio_query(self, text: str, speaker: int) -> str:
         """
@@ -153,6 +155,38 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 file_path = f.name
             return file_path
 
+    def create_after_callback(self, guild_id) -> None:
+        # create recursive callback function
+        def after_callback(error):
+            async def play_next():
+                if error:
+                    print(f"Error: {error}")
+                self.server_to_if_playing[guild_id] = False
+
+                if not self.server_to_audio_queue[guild_id].empty():
+                    next_audio_path = await self.server_to_audio_queue[guild_id].get()
+                    self.server_to_if_playing[guild_id] = True
+                    source = discord.FFmpegPCMAudio(next_audio_path)
+                    voice_client = self.server_to_voice_client[guild_id]
+                    voice_client.play(source, after=self.create_after_callback(guild_id))
+                else:
+                    pass
+
+            # schedule the coroutine to be run on the event loop
+            asyncio.run_coroutine_threadsafe(play_next(), self.bot.loop)
+
+        return after_callback
+
+    async def add_to_queue(self, path: str, guild_id: str) -> None:
+        voice_client = self.server_to_voice_client[guild_id]
+        if voice_client is None:
+            return
+        if self.server_to_if_playing[guild_id]:
+            await self.server_to_audio_queue[guild_id].put(path)
+        else:
+            self.server_to_if_playing[guild_id] = True
+            voice_client.play(discord.FFmpegPCMAudio(path), after=self.create_after_callback(guild_id))
+
     @commands.Cog.listener()
     async def on_message(self, message) -> None:
         """
@@ -173,14 +207,13 @@ class VoiceVox(commands.Cog, name="voicevox"):
 
         speaker_to_use = self.server_to_speaker_id[message.guild.id]
 
-        voice_client = self.server_to_voice_client[message.guild.id]
-
         if message.author.id == 848533749708357666:  # For Briki#2549
             speaker_to_use = 14
 
-        path = self._save_tempfile(message.content, speaker_to_use)  # current implementation
+        guild_id = message.guild.id
+        path = self._save_tempfile(message.content, speaker_to_use) 
+        await self.add_to_queue(path=path, guild_id=guild_id)
         print(f"[VoiceVox] Input query text: {message.content}")
-        voice_client.play(discord.FFmpegPCMAudio(path))
 
     @commands.hybrid_command(
         name="join",
@@ -195,6 +228,9 @@ class VoiceVox(commands.Cog, name="voicevox"):
         user = context.author
         if user.voice is None:
             await context.reply("You are not connected to a voice channel.")
+            return
+        if self.server_to_voice_client[context.guild.id] is not None:
+            await context.reply("VoiceVox Bot is already connected to a voice channel.")
             return
 
         self.server_to_text_input_channel[context.guild.id] = context.channel
