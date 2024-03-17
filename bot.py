@@ -12,6 +12,7 @@ import json
 import logging
 import platform
 import random
+import requests
 import time
 from dotenv import load_dotenv
 
@@ -138,7 +139,7 @@ class DiscordBot(commands.Bot):
         """
         Setup the game status task of the bot.
         """
-        statuses = ["with you!"]
+        statuses = ["VoiceVox"]
         await self.change_presence(activity=discord.Game(random.choice(statuses)))
 
     @status_task.before_loop
@@ -168,6 +169,19 @@ class DiscordBot(commands.Bot):
             )
         )
         # self.hiroyuki_init()
+
+        # check VOICEVOX connection
+        try:
+            test_url = os.getenv("NGROK_URL") + "/version"
+            response = requests.get(test_url)
+            if response.status_code == 200:
+                version = response.text.replace('"', '')
+                self.logger.info(f"Successfully connected to VOICEVOX (version {version}).")
+            else:
+                self.logger.warning("Failed to connect to VOICEVOX")
+        except Exception:
+            self.logger.warning("Failed to connect to VOICEVOX")
+
         self.logger.info("Successfully setup the bot")
 
     async def on_message(self, message: discord.Message) -> None:
@@ -284,15 +298,19 @@ class DiscordBot(commands.Bot):
         self.driver.find_element(By.XPATH, "/html/body/div/div/div[3]/div[1]/div/button[1]").click()
         time.sleep(5)  # log in
         self.logger.info("[HIROYUKI] Successfully logged in")
-
+        self.driver.save_screenshot("img/screenshot1.png")
         # Set up the project page
         self.driver.get("https://coefont.cloud/editor/c02784bf-85c9-4d48-8f08-adf8365327cb")
-        time.sleep(3)
-        for _ in range(3):
-            self.driver.find_element(By.XPATH, "/html/body/div/div[4]/div/div/button").click()  # rep 3 times
-            time.sleep(0.5)
-        self.driver.find_element(By.XPATH, "/html/body/div/div[1]/div/div[1]/div[4]/div").click()
+        time.sleep(5)
+        self.driver.save_screenshot("img/screenshot2.png")
+        time.sleep(5)
+        # for _ in range(3):
+        #     self.driver.find_element(By.XPATH, "/html/body/div/div[4]/div/div/button").click()  # rep 3 times
+        #     time.sleep(3)
+        # self.driver.save_screenshot(f"img/screenshot{3+_}.png")
 
+        self.driver.find_element(By.XPATH, "/html/body/div/div[1]/div/div[1]/div[4]/div").click()
+        self.driver.save_screenshot("img/screenshot6.png")
         self.logger.info("[HIROYUKI] Successfully initialized input section")
 
 
