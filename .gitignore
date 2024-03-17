@@ -102,3 +102,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# custom files
+ngrok.txt
+test1.py
+test2.py
+audio/*
+img/*
