@@ -105,7 +105,7 @@ venv.bak/
 
 # custom files
 ngrok.txt
-test1.py
-test2.py
+test/
 audio/*
 img/*
+custom_setting.json
