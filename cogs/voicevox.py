@@ -6,18 +6,21 @@ Version: 6.1.0
 Modified by Y.Ozaki - https://github.com/mttk1528
 """
 
-import os
-import tempfile
-import requests
 import asyncio
+import json
+import os
+import re
+import tempfile
 import time
-from datetime import datetime, timedelta
 from collections import defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import discord
+import requests
 from discord.ext import commands
 from discord.ext.commands import Context
-
+from dotenv import load_dotenv
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
@@ -77,6 +80,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
         self.server_to_user_channel = defaultdict(lambda: None)
         self.server_to_audio_queue = defaultdict(asyncio.Queue)
         self.server_to_if_playing = defaultdict(lambda: False)
+        self.POST_URL = os.getenv("NGROK_URL")
 
     def _post_audio_query(self, text: str, speaker: int) -> str:
         """
@@ -85,7 +89,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
         :param text: The text to post to the API.
         :param speaker: The speaker ID to use.
         """
-        post_url = "https://4dde-125-12-117-6.ngrok-free.app/audio_query"
+        post_url = self.POST_URL + "/audio_query"
         post_data = {
             "text": text,
             "speaker": speaker,
@@ -100,7 +104,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
         :param data: The data to post to the API.
         :param speaker: The speaker ID to use.
         """
-        post_url = "https://4dde-125-12-117-6.ngrok-free.app/synthesis"
+        post_url = self.POST_URL + "/synthesis"
         post_data = {
             "speaker": speaker,
         }
@@ -155,7 +159,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 file_path = f.name
             return file_path
 
-    def create_after_callback(self, guild_id) -> None:
+    def _create_after_callback(self, guild_id) -> None:
         # create recursive callback function
         def after_callback(error):
             async def play_next():
@@ -168,7 +172,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
                     self.server_to_if_playing[guild_id] = True
                     source = discord.FFmpegPCMAudio(next_audio_path)
                     voice_client = self.server_to_voice_client[guild_id]
-                    voice_client.play(source, after=self.create_after_callback(guild_id))
+                    voice_client.play(source, after=self._create_after_callback(guild_id))  # recursion
                 else:
                     pass
 
@@ -177,7 +181,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
 
         return after_callback
 
-    async def add_to_queue(self, path: str, guild_id: str) -> None:
+    async def _add_to_queue(self, path: str, guild_id: str) -> None:
         voice_client = self.server_to_voice_client[guild_id]
         if voice_client is None:
             return
@@ -185,7 +189,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
             await self.server_to_audio_queue[guild_id].put(path)
         else:
             self.server_to_if_playing[guild_id] = True
-            voice_client.play(discord.FFmpegPCMAudio(path), after=self.create_after_callback(guild_id))
+            voice_client.play(discord.FFmpegPCMAudio(path), after=self._create_after_callback(guild_id))
 
     @commands.Cog.listener()
     async def on_message(self, message) -> None:
@@ -205,15 +209,69 @@ class VoiceVox(commands.Cog, name="voicevox"):
         if message.content.startswith("https://") or message.content.startswith("http://"):
             return
 
-        speaker_to_use = self.server_to_speaker_id[message.guild.id]
-
-        if message.author.id == 848533749708357666:  # For Briki#2549
-            speaker_to_use = 14
-
+        message_content = message.content
         guild_id = message.guild.id
-        path = self._save_tempfile(message.content, speaker_to_use) 
-        await self.add_to_queue(path=path, guild_id=guild_id)
-        print(f"[VoiceVox] Input query text: {message.content}")
+        speaker_to_use = self.server_to_speaker_id[message.guild.id]  # default speaker
+
+        json_path = str(Path(__file__).resolve().parent.parent) + "/custom_setting.json"
+        # load custom settings
+        with open(json_path, "r") as file:
+            custom_setting = json.load(file)
+
+        #  get custom setting dict. key: emoji_id, sticker_id, author_id
+        custom_emoji = {int(key): val for key, val in custom_setting.get("custom_emoji").items()}
+        custom_sticker = {int(key): val for key, val in custom_setting.get("custom_sticker").items()}
+        custom_speaker = {int(key): val for key, val in custom_setting.get("custom_speaker").items()}
+
+        # check if the message author has a specific speaker setting
+        print(custom_speaker.keys())
+        print(message.author.id)
+        if message.author.id in custom_speaker.keys():
+
+            speaker_to_use = custom_speaker[message.author.id]["speaker_id"]  # int
+
+        # check if the message has stickers and if they are the specific ones
+        if len(message.stickers) > 0:
+            sticker_id = message.stickers[0].id
+            if sticker_id in custom_sticker.keys():  # only 1 sticker for each message
+                if custom_sticker[sticker_id]["filename"] is None:
+                    content = custom_sticker[sticker_id]["content"]
+                    path = self._save_tempfile(content, speaker_to_use)
+                else:
+                    filename = custom_sticker[sticker_id]["filename"]
+                    path = str(Path(__file__).resolve().parent.parent) + "/audio/" + filename
+
+                await self._add_to_queue(path=path, guild_id=message.guild.id)
+                return
+            else:
+                return
+
+        # check if the message has emojis and if they are the specific ones
+        contained_emoji = re.findall(r'<:\w+:\d+>', message.content)
+        if len(contained_emoji) > 0:
+            for emoji in contained_emoji:
+                emoji_id = int(re.findall(r'\d+', emoji)[0])
+                if emoji_id in custom_emoji.keys():
+                    if custom_emoji[emoji_id]["filename"] is None:
+                        content = custom_emoji[emoji_id]["content"]
+                        path = self._save_tempfile(content, speaker_to_use)
+                    else:
+                        filename = custom_sticker[sticker_id]["filename"]
+                        path = str(Path(__file__).resolve().parent.parent) + "/audio/" + filename
+
+                    await self._add_to_queue(path=path, guild_id=message.guild.id)
+            return
+
+        # wをわらに置換
+        message_content = message_content.replace("w", "わら")
+        # mensionを無視
+        message_content = re.sub(r"<@\d+>", "", message_content)
+        path = self._save_tempfile(message.content, speaker_to_use)
+        try:
+            await self._add_to_queue(path=path, guild_id=guild_id)
+        except Exception as e:
+            print(f"Error during message handling: {e}")
+        print(f"[VoiceVox] Input query text: {message_content}")
 
     @commands.hybrid_command(
         name="join",
@@ -262,6 +320,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
             await context.reply(f"Leaving {voice_client.channel.mention} 👋")
             await voice_client.disconnect()
             self.server_to_text_input_channel[context.guild.id] = None
+            self.server_to_voice_client[context.guild.id] = None
 
     @commands.hybrid_command(
         name="change",
@@ -302,6 +361,9 @@ class VoiceVox(commands.Cog, name="voicevox"):
             color=0x00FF00,
         )
         await context.reply(embed=embed)
+
+
+load_dotenv()
 
 
 async def setup(bot) -> None:
