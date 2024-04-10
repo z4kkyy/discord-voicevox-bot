@@ -18,7 +18,7 @@ from pathlib import Path
 
 import discord
 import requests
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from dotenv import load_dotenv
 from selenium.webdriver.common.by import By
@@ -81,6 +81,15 @@ class VoiceVox(commands.Cog, name="voicevox"):
         self.server_to_audio_queue = defaultdict(asyncio.Queue)
         self.server_to_if_playing = defaultdict(lambda: False)
         self.POST_URL = os.getenv("NGROK_URL")
+        self.send_heartbeat.start()
+
+    @tasks.loop(seconds=3600)
+    async def send_heartbeat(self) -> None:
+        for guild_id in self.server_to_voice_client.keys():
+            voice_client = self.server_to_voice_client[guild_id]
+            if voice_client is not None:
+                silent_audio = discord.FFmpegPCMAudio(source="anullsrc=cl:0.1", options="-f s16le -ar 48000 -ac 2 -loglevel quiet")
+                voice_client.play(silent_audio)
 
     def _post_audio_query(self, text: str, speaker: int) -> str:
         """
@@ -224,15 +233,15 @@ class VoiceVox(commands.Cog, name="voicevox"):
         custom_speaker = {int(key): val for key, val in custom_setting.get("custom_speaker").items()}
 
         # check if the message author has a specific speaker setting
-        print(custom_speaker.keys())
-        print(message.author.id)
+        # print(custom_speaker.keys())
+        # print(message.author.id)
         if message.author.id in custom_speaker.keys():
-
             speaker_to_use = custom_speaker[message.author.id]["speaker_id"]  # int
 
         # check if the message has stickers and if they are the specific ones
         if len(message.stickers) > 0:
             sticker_id = message.stickers[0].id
+            # print(f"sticker_id: {sticker_id}")
             if sticker_id in custom_sticker.keys():  # only 1 sticker for each message
                 if custom_sticker[sticker_id]["filename"] is None:
                     content = custom_sticker[sticker_id]["content"]
@@ -264,9 +273,12 @@ class VoiceVox(commands.Cog, name="voicevox"):
 
         # wをわらに置換
         message_content = message_content.replace("w", "わら")
+        message_content = message_content.replace("ｗ", "わら")
+        # 文末の「笑」を「わら」に置換
+        message_content = re.sub(r'笑+$', lambda m: 'わら' * len(m.group()), message_content)
         # mensionを無視
         message_content = re.sub(r"<@\d+>", "", message_content)
-        path = self._save_tempfile(message.content, speaker_to_use)
+        path = self._save_tempfile(message_content, speaker_to_use)
         try:
             await self._add_to_queue(path=path, guild_id=guild_id)
         except Exception as e:
