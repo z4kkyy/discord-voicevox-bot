@@ -283,7 +283,12 @@ class VoiceVox(commands.Cog, name="voicevox"):
             await self._add_to_queue(path=path, guild_id=guild_id)
         except Exception as e:
             print(f"Error during message handling: {e}")
-        print(f"[VoiceVox] Input query text: {message_content}")
+
+        # create logs
+        self.bot.logger.info(f"[VoiceVox] Input query text: {message_content}")
+        query_hist_path = str(Path(__file__).resolve().parent.parent) + "/query_hist.txt"
+        with open(query_hist_path, 'w') as file:
+            file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] discord_bot: VOICEVOX query: '{message_content}'\n")
 
     @commands.hybrid_command(
         name="join",
