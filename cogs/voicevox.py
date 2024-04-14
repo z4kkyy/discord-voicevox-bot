@@ -83,13 +83,15 @@ class VoiceVox(commands.Cog, name="voicevox"):
         self.POST_URL = os.getenv("NGROK_URL")
         self.send_heartbeat.start()
 
-    @tasks.loop(seconds=3600)
+    @tasks.loop(seconds=1800)
     async def send_heartbeat(self) -> None:
         for guild_id in self.server_to_voice_client.keys():
             voice_client = self.server_to_voice_client[guild_id]
             if voice_client is not None:
-                silent_audio = discord.FFmpegPCMAudio(source="anullsrc=cl:0.1", options="-f s16le -ar 48000 -ac 2 -loglevel quiet")
-                voice_client.play(silent_audio)
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fp:
+                    silent_audio_path = fp.name
+                os.system(f"ffmpeg -f lavfi -i anullsrc=r=11025:cl=mono -y -t 0.1 -c:a pcm_s16le {silent_audio_path} -loglevel quiet")
+                await self._add_to_queue(path=silent_audio_path, guild_id=guild_id)
 
     def _post_audio_query(self, text: str, speaker: int) -> str:
         """
@@ -179,7 +181,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 if not self.server_to_audio_queue[guild_id].empty():
                     next_audio_path = await self.server_to_audio_queue[guild_id].get()
                     self.server_to_if_playing[guild_id] = True
-                    source = discord.FFmpegPCMAudio(next_audio_path)
+                    source = discord.FFmpegPCMAudio(next_audio_path)  # options="-ac 2" で正常に再生される
                     voice_client = self.server_to_voice_client[guild_id]
                     voice_client.play(source, after=self._create_after_callback(guild_id))  # recursion
                 else:
@@ -271,6 +273,8 @@ class VoiceVox(commands.Cog, name="voicevox"):
                     await self._add_to_queue(path=path, guild_id=message.guild.id)
             return
 
+        print(f'new message: {message_content!r}')
+
         # wをわらに置換
         message_content = message_content.replace("w", "わら")
         message_content = message_content.replace("ｗ", "わら")
@@ -278,17 +282,21 @@ class VoiceVox(commands.Cog, name="voicevox"):
         message_content = re.sub(r'笑+$', lambda m: 'わら' * len(m.group()), message_content)
         # mensionを無視
         message_content = re.sub(r"<@\d+>", "", message_content)
+
+        # generate audio file
         path = self._save_tempfile(message_content, speaker_to_use)
+        print(f'successfully generated. path: {path}')
+
         try:
             await self._add_to_queue(path=path, guild_id=guild_id)
         except Exception as e:
             print(f"Error during message handling: {e}")
 
-        # create logs
-        self.bot.logger.info(f"[VoiceVox] Input query text: {message_content}")
+        # show logs
+        self.bot.logger.info(f"[VoiceVox] Input query text: '{message.content}' by {message.author}")
         query_hist_path = str(Path(__file__).resolve().parent.parent) + "/query_hist.txt"
-        with open(query_hist_path, 'w') as file:
-            file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] discord_bot: VOICEVOX query: '{message_content}'\n")
+        with open(query_hist_path, 'a') as file:
+            file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] discord_bot: VOICEVOX query: '{message.content}' by {message.author} (ID: {message.author.id}) \n")
 
     @commands.hybrid_command(
         name="join",
@@ -315,6 +323,36 @@ class VoiceVox(commands.Cog, name="voicevox"):
         embed = discord.Embed(
             title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
             description=(f"Joined {user.voice.channel.mention} (Ping: {latency:.0f}ms)"),
+            color=0x00FF00,
+        )
+        await context.reply(embed=embed)
+
+    @commands.hybrid_command(
+        name="jointhis",
+        description="Joins the specified voice channel.",
+    )
+    async def joinnow(self, context: Context, channel_id: str) -> None:
+        """
+        Joins the specified voice channel.
+
+        :param context: The application command context.
+        :param channel_id: The ID of the voice channel to join.
+        """
+        channel = discord.utils.get(context.guild.voice_channels, id=int(channel_id))
+        if channel is None:
+            await context.reply(f"Voice channel with ID {channel_id} not found.")
+            return
+        if self.server_to_voice_client[context.guild.id] is not None:
+            await context.reply("VoiceVox Bot is already connected to a voice channel.")
+            return
+
+        self.server_to_text_input_channel[context.guild.id] = context.channel
+        self.server_to_voice_client[context.guild.id] = await channel.connect()
+        self.server_to_user_channel[context.guild.id] = channel
+        latency = self.bot.latency * 1000
+        embed = discord.Embed(
+            title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
+            description=(f"Joined {channel.mention} (Ping: {latency:.0f}ms)"),
             color=0x00FF00,
         )
         await context.reply(embed=embed)
