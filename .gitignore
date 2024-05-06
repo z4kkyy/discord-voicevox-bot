@@ -109,3 +109,5 @@ test/
 audio/*
 img/*
 custom_setting.json
+query_hist.txt
+*_past.py
