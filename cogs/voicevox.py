@@ -146,7 +146,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
             file_path = f.name
         return file_path
 
-    def _create_after_callback(self, guild_id) -> None:
+    def _create_after_callback(self, guild_id, previous_path) -> callable:
         # create recursive callback function
         def after_callback(error):
             async def play_next():
@@ -154,12 +154,15 @@ class VoiceVox(commands.Cog, name="voicevox"):
                     print(f"Error: {error}")
                 self.server_to_if_playing[guild_id] = False
 
+                # remove the previous audio file
+                os.remove(previous_path)
+
                 if not self.server_to_audio_queue[guild_id].empty():
                     next_audio_path = await self.server_to_audio_queue[guild_id].get()
                     self.server_to_if_playing[guild_id] = True
                     source = discord.FFmpegPCMAudio(next_audio_path)
                     voice_client = self.server_to_voice_client[guild_id]
-                    voice_client.play(source, after=self._create_after_callback(guild_id))  # recursive call
+                    voice_client.play(source, after=self._create_after_callback(guild_id, next_audio_path))  # recursive call
                 else:
                     pass
 
@@ -182,7 +185,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
             await self.server_to_audio_queue[guild_id].put(path)
         else:
             self.server_to_if_playing[guild_id] = True
-            voice_client.play(discord.FFmpegPCMAudio(path), after=self._create_after_callback(guild_id))
+            voice_client.play(discord.FFmpegPCMAudio(path), after=self._create_after_callback(guild_id, path))
 
     @commands.Cog.listener()
     async def on_message(self, message) -> None:
