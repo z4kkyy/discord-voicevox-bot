@@ -122,6 +122,9 @@ class VoiceVox(commands.Cog, name="voicevox"):
     def _generate_audio_file(self, text: str, speaker: int) -> str:
         """
         Generates an audio file using the specified speaker.
+
+        :param text: The text to generate the audio file from.
+        :param speaker: The speaker ID to use.
         """
         # if speaker == 100:  # hiro
         #     file_path = self._generate_hiro_audio(text)
@@ -129,7 +132,8 @@ class VoiceVox(commands.Cog, name="voicevox"):
         # else:
 
         # print(f"Generating audio file for '{text}' with speaker ID {speaker}.")
-        if not self.voicevox_core.is_model_loaded(speaker):
+
+        if not self.voicevox_core.is_model_loaded(speaker):  # NOTE: use VoiceVoxCore instead of the API (24.5.7~)
             self.voicevox_core.load_model(speaker)
         audio_data = self.voicevox_core.tts(text, speaker)
 
@@ -165,6 +169,12 @@ class VoiceVox(commands.Cog, name="voicevox"):
         return after_callback
 
     async def _add_to_queue(self, path: str, guild_id: str) -> None:
+        """
+        Adds an audio file to the queue.
+
+        :param path: The path of the audio file to add.
+        :param guild_id: The ID of the guild to add the audio file to.
+        """
         voice_client = self.server_to_voice_client[guild_id]
         if voice_client is None:
             return
@@ -192,6 +202,8 @@ class VoiceVox(commands.Cog, name="voicevox"):
         if message.content.startswith("https://") or message.content.startswith("http://"):
             return
         if message.content.startswith("*ig"):
+            return
+        if message.content.startswith("```"):
             return
 
         message_content = message.content
