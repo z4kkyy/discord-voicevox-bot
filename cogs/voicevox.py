@@ -11,18 +11,21 @@ import json
 import os
 import re
 import tempfile
-import time
+# import time
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import discord
 import requests
-from discord.ext import commands, tasks
+from discord.ext import commands
+# from discord.ext import tasks
 from discord.ext.commands import Context
 from dotenv import load_dotenv
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+from voicevox_core import VoicevoxCore
+
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.common.keys import Keys
 
 
 class SelectSpeakerView(discord.ui.View):
@@ -41,7 +44,6 @@ class SelectSpeakerView(discord.ui.View):
             "青山龍星（ノーマル）": 13,
             "青山龍星（囁き）": 86,
             "青山龍星（しっとり）": 84,
-            "西村博之": 100,
         }
         self.waiter = asyncio.Event()
 
@@ -66,7 +68,6 @@ class SelectSpeakerView(discord.ui.View):
             color=0x00FF00,
         )
         await interaction.followup.send(embed=embed)
-        # print("selected_speaker_id: ", self.selected_speaker_id, "selected_speaker: ", self.selected_speaker)
         self.waiter.set()
 
 
@@ -74,24 +75,20 @@ class VoiceVox(commands.Cog, name="voicevox"):
     def __init__(self, bot) -> None:
         self.bot = bot
         self.server_to_voice_client = defaultdict(lambda: None)
+        self.server_to_if_connected = defaultdict(lambda: None)
         self.server_to_text_input_channel = defaultdict(lambda: None)
         self.server_to_speaker_id = defaultdict(lambda: 3)
         self.server_to_speaker = defaultdict(lambda: "ずんだもん（ノーマル）")
         self.server_to_user_channel = defaultdict(lambda: None)
         self.server_to_audio_queue = defaultdict(asyncio.Queue)
         self.server_to_if_playing = defaultdict(lambda: False)
-        self.POST_URL = os.getenv("NGROK_URL")
-        self.send_heartbeat.start()
 
-    @tasks.loop(seconds=1800)
-    async def send_heartbeat(self) -> None:
-        for guild_id in self.server_to_voice_client.keys():
-            voice_client = self.server_to_voice_client[guild_id]
-            if voice_client is not None:
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fp:
-                    silent_audio_path = fp.name
-                os.system(f"ffmpeg -f lavfi -i anullsrc=r=11025:cl=mono -y -t 0.1 -c:a pcm_s16le {silent_audio_path} -loglevel quiet")
-                await self._add_to_queue(path=silent_audio_path, guild_id=guild_id)
+        self.server_to_expected_disconnection = defaultdict(lambda: False)  # for unexpected disconnection
+        self.POST_URL = os.getenv("NGROK_URL")
+
+        self.JTALK_DICT_DIR = os.path.realpath(os.path.expanduser("~/open_jtalk_dic_utf_8-1.11"))
+        self.voicevox_core = VoicevoxCore(open_jtalk_dict_dir=self.JTALK_DICT_DIR)
+        self.voicevox_core.load_model(3)
 
     def _post_audio_query(self, text: str, speaker: int) -> str:
         """
@@ -122,53 +119,28 @@ class VoiceVox(commands.Cog, name="voicevox"):
         response = requests.post(post_url, params=post_data, json=data)
         return response.content
 
-    def _generate_hiroyuki_audio(self, text: str) -> str:
+    def _generate_audio_file(self, text: str, speaker: int) -> str:
         """
-        Generates an audio file using the Hiroyuki speaker.
-
-        :param text: The text to generate the audio file from.
+        Generates an audio file using the specified speaker.
         """
-        driver = self.bot.driver
-        download_dir = self.bot.download_dir
-        for filename in os.listdir(download_dir):
-            file_path = os.path.join(download_dir, filename)
-            os.remove(file_path)
-        text_input = driver.find_element(By.XPATH, "/html/body/div/div[1]/div/div[1]/div[4]/div/div[1]/div")
+        # if speaker == 100:  # hiro
+        #     file_path = self._generate_hiro_audio(text)
+        #     return file_path
+        # else:
 
-        text_input.send_keys(Keys.CONTROL + "a")
-        text_input.send_keys(Keys.DELETE)
-        text_input.send_keys(text)
-        # time.sleep(1)
+        # print(f"Generating audio file for '{text}' with speaker ID {speaker}.")
+        if not self.voicevox_core.is_model_loaded(speaker):
+            self.voicevox_core.load_model(speaker)
+        audio_data = self.voicevox_core.tts(text, speaker)
 
-        self.bot.logger.info("[HIROYUKI] Starting audio download.")
-        download_button = driver.find_element(By.XPATH, "/html/body/div/div[1]/div/div[1]/div[4]/div/div[2]/button[2]")
-        download_button.click()
-        while len(os.listdir(download_dir)) == 0:
-            time.sleep(1)
-        self.bot.logger.info("[HIROYUKI] Download finished.")
-        driver.save_screenshot(f"img/{str(datetime.now())}.png")  # Save a screenshot for debug
-        start_time = datetime.now()
-        while (datetime.now() - start_time) < timedelta(seconds=10):
-            if len(os.listdir(download_dir)) > 0:
-                file_name = os.listdir(download_dir)[0]
-                os.rename(f"{download_dir}/{file_name}", f"{download_dir}/audio.wav")
-                break
-            else:
-                time.sleep(1)
-                continue
-        return f"{download_dir}/audio.wav"
+        # # past implementation
+        # text_data = self._post_audio_query(text, speaker)
+        # audio_data = self._post_synthesis(text_data, speaker)
 
-    def _save_tempfile(self, text: str, speaker: int) -> str:
-        if speaker == 100:  # Hiroyuki
-            file_path = self._generate_hiroyuki_audio(text)
-            return file_path
-        else:
-            text_data = self._post_audio_query(text, speaker)
-            audio_data = self._post_synthesis(text_data, speaker)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                f.write(audio_data)
-                file_path = f.name
-            return file_path
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_data)
+            file_path = f.name
+        return file_path
 
     def _create_after_callback(self, guild_id) -> None:
         # create recursive callback function
@@ -181,9 +153,9 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 if not self.server_to_audio_queue[guild_id].empty():
                     next_audio_path = await self.server_to_audio_queue[guild_id].get()
                     self.server_to_if_playing[guild_id] = True
-                    source = discord.FFmpegPCMAudio(next_audio_path)  # options="-ac 2" で正常に再生される
+                    source = discord.FFmpegPCMAudio(next_audio_path)
                     voice_client = self.server_to_voice_client[guild_id]
-                    voice_client.play(source, after=self._create_after_callback(guild_id))  # recursion
+                    voice_client.play(source, after=self._create_after_callback(guild_id))  # recursive call
                 else:
                     pass
 
@@ -219,12 +191,15 @@ class VoiceVox(commands.Cog, name="voicevox"):
             return
         if message.content.startswith("https://") or message.content.startswith("http://"):
             return
+        if message.content.startswith("*ig"):
+            return
 
         message_content = message.content
         guild_id = message.guild.id
-        speaker_to_use = self.server_to_speaker_id[message.guild.id]  # default speaker
+        speaker_to_use = self.server_to_speaker_id[message.guild.id]
 
         json_path = str(Path(__file__).resolve().parent.parent) + "/custom_setting.json"
+
         # load custom settings
         with open(json_path, "r") as file:
             custom_setting = json.load(file)
@@ -235,19 +210,16 @@ class VoiceVox(commands.Cog, name="voicevox"):
         custom_speaker = {int(key): val for key, val in custom_setting.get("custom_speaker").items()}
 
         # check if the message author has a specific speaker setting
-        # print(custom_speaker.keys())
-        # print(message.author.id)
         if message.author.id in custom_speaker.keys():
             speaker_to_use = custom_speaker[message.author.id]["speaker_id"]  # int
 
         # check if the message has stickers and if they are the specific ones
         if len(message.stickers) > 0:
             sticker_id = message.stickers[0].id
-            # print(f"sticker_id: {sticker_id}")
-            if sticker_id in custom_sticker.keys():  # only 1 sticker for each message
+            if sticker_id in custom_sticker.keys():  # at most 1 sticker for each message
                 if custom_sticker[sticker_id]["filename"] is None:
                     content = custom_sticker[sticker_id]["content"]
-                    path = self._save_tempfile(content, speaker_to_use)
+                    path = self._generate_audio_file(content, speaker_to_use)
                 else:
                     filename = custom_sticker[sticker_id]["filename"]
                     path = str(Path(__file__).resolve().parent.parent) + "/audio/" + filename
@@ -265,7 +237,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 if emoji_id in custom_emoji.keys():
                     if custom_emoji[emoji_id]["filename"] is None:
                         content = custom_emoji[emoji_id]["content"]
-                        path = self._save_tempfile(content, speaker_to_use)
+                        path = self._generate_audio_file(content, speaker_to_use)
                     else:
                         filename = custom_sticker[sticker_id]["filename"]
                         path = str(Path(__file__).resolve().parent.parent) + "/audio/" + filename
@@ -275,16 +247,16 @@ class VoiceVox(commands.Cog, name="voicevox"):
 
         print(f'new message: {message_content!r}')
 
-        # wをわらに置換
+        # replace "w" with "わら"
         message_content = message_content.replace("w", "わら")
         message_content = message_content.replace("ｗ", "わら")
-        # 文末の「笑」を「わら」に置換
+        # replace successive "笑" in the end with "わら"
         message_content = re.sub(r'笑+$', lambda m: 'わら' * len(m.group()), message_content)
-        # mensionを無視
+        # remove user mentions
         message_content = re.sub(r"<@\d+>", "", message_content)
 
         # generate audio file
-        path = self._save_tempfile(message_content, speaker_to_use)
+        path = self._generate_audio_file(message_content, speaker_to_use)
         print(f'successfully generated. path: {path}')
 
         try:
@@ -296,7 +268,30 @@ class VoiceVox(commands.Cog, name="voicevox"):
         self.bot.logger.info(f"[VoiceVox] Input query text: '{message.content}' by {message.author}")
         query_hist_path = str(Path(__file__).resolve().parent.parent) + "/query_hist.txt"
         with open(query_hist_path, 'a') as file:
-            file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] discord_bot: VOICEVOX query: '{message.content}' by {message.author} (ID: {message.author.id}) \n")
+            file.write(
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] discord_bot: VOICEVOX query: '{message.content}' by {message.author} (ID: {message.author.id}) \n"
+            )
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after) -> None:
+        """
+        Handles the on_voice_state_update event.
+        This function is used to detect unexpected disconnection of the bot from a voice channel.
+
+        :param member: The member who updated their voice state.
+        :param before: The voice state before the update.
+        :param after: The voice state after the update.
+        """
+        if member.id == self.bot.user.id:
+            guild_id = member.guild.id
+            if before.channel is not None and after.channel is None:
+                if self.server_to_expected_disconnection[guild_id]:
+                    print("Detected normal disconnection.")
+                    self.server_to_expected_disconnection[guild_id] = False
+                else:
+                    print("Detected unexpected disconnection. Check the close code.")
+                    # reconnect to the voice channel
+                    self.server_to_voice_client[guild_id] = await before.channel.connect()
 
     @commands.hybrid_command(
         name="join",
@@ -309,29 +304,47 @@ class VoiceVox(commands.Cog, name="voicevox"):
         :param context: The application command context.
         """
         user = context.author
+        if_send_embed = True
+
         if user.voice is None:
-            await context.reply("You are not connected to a voice channel.")
+            embed = discord.Embed(
+                description="You are not connected to a voice channel.", color=0xE02B2B
+            )
+            await context.reply(embed=embed)
             return
         if self.server_to_voice_client[context.guild.id] is not None:
-            await context.reply("VoiceVox Bot is already connected to a voice channel.")
-            return
+            if self.server_to_voice_client[context.guild.id].is_connected() is True:
+                self. server_to_expected_disconnection[context.guild.id] = True
+                await self.server_to_voice_client[context.guild.id].disconnect()
+                self.server_to_voice_client[context.guild.id] = None
+                if_send_embed = False
 
+        # set the server settings
         self.server_to_text_input_channel[context.guild.id] = context.channel
         self.server_to_voice_client[context.guild.id] = await user.voice.channel.connect()
+        self.server_to_if_connected[context.guild.id] = True
         self.server_to_user_channel[context.guild.id] = user.voice.channel
+
+        # send logs to the text channel
         latency = self.bot.latency * 1000
-        embed = discord.Embed(
-            title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
-            description=(f"Joined {user.voice.channel.mention} (Ping: {latency:.0f}ms)"),
-            color=0x00FF00,
-        )
-        await context.reply(embed=embed)
+        if if_send_embed:
+            embed = discord.Embed(
+                title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
+                description=(f"Joined {user.voice.channel.mention} (Ping: {latency:.0f}ms)"),
+                color=0x00FF00,
+            )
+            await context.reply(embed=embed)
+        else:
+            embed = discord.Embed(
+                description="Reconnected to the voice channel.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
 
     @commands.hybrid_command(
         name="jointhis",
         description="Joins the specified voice channel.",
     )
-    async def joinnow(self, context: Context, channel_id: str) -> None:
+    async def jointhis(self, context: Context, channel_id: str) -> None:
         """
         Joins the specified voice channel.
 
@@ -339,23 +352,42 @@ class VoiceVox(commands.Cog, name="voicevox"):
         :param channel_id: The ID of the voice channel to join.
         """
         channel = discord.utils.get(context.guild.voice_channels, id=int(channel_id))
+        if_send_embed = True
+
         if channel is None:
-            await context.reply(f"Voice channel with ID {channel_id} not found.")
-            return
-        if self.server_to_voice_client[context.guild.id] is not None:
-            await context.reply("VoiceVox Bot is already connected to a voice channel.")
+            embed = discord.Embed(
+                description=f"Voice channel with ID {channel_id} not found.", color=0xE02B2B
+            )
+            await context.reply(embed=embed)
             return
 
+        if self.server_to_voice_client[context.guild.id] is not None:
+            if self.server_to_voice_client[context.guild.id].is_connected() is True:
+                self. server_to_expected_disconnection[context.guild.id] = True
+                await self.server_to_voice_client[context.guild.id].disconnect()
+                self.server_to_voice_client[context.guild.id] = None
+                if_send_embed = False
+
+        # set the server settings
         self.server_to_text_input_channel[context.guild.id] = context.channel
         self.server_to_voice_client[context.guild.id] = await channel.connect()
+        self.server_to_if_connected[context.guild.id] = True
         self.server_to_user_channel[context.guild.id] = channel
+
+        # send logs to the text channel
         latency = self.bot.latency * 1000
-        embed = discord.Embed(
-            title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
-            description=(f"Joined {channel.mention} (Ping: {latency:.0f}ms)"),
-            color=0x00FF00,
-        )
-        await context.reply(embed=embed)
+        if if_send_embed:
+            embed = discord.Embed(
+                title=f"VoiceVox Bot: {self.server_to_speaker[context.guild.id]}",
+                description=(f"Joined {channel.mention} (Ping: {latency:.0f}ms)"),
+                color=0x00FF00,
+            )
+            await context.reply(embed=embed)
+        else:
+            embed = discord.Embed(
+                description="Reconnected to the voice channel.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
 
     @commands.hybrid_command(
         name="leave",
@@ -369,13 +401,52 @@ class VoiceVox(commands.Cog, name="voicevox"):
         """
         voice_client = self.server_to_voice_client[context.guild.id]
         if voice_client is None:
-            await context.reply("VoiceVox Bot is not connected to a voice channel.")
+            embed = discord.Embed(
+                description="VoiceVox Bot is not connected to a voice channel.", color=0xE02B2B
+            )
+            await context.reply(embed=embed)
             return
         else:
-            await context.reply(f"Leaving {voice_client.channel.mention} 👋")
+            embed = discord.Embed(
+                description=f"Leaving {voice_client.channel.mention} 👋", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            self. server_to_expected_disconnection[context.guild.id] = True
             await voice_client.disconnect()
-            self.server_to_text_input_channel[context.guild.id] = None
+
+            # reset the server settings
             self.server_to_voice_client[context.guild.id] = None
+            self.server_to_if_connected[context.guild.id] = False
+            self.server_to_text_input_channel[context.guild.id] = None
+            self.server_to_user_channel[context.guild.id] = None
+            self.server_to_audio_queue[context.guild.id] = asyncio.Queue()
+            self.server_to_if_playing[context.guild.id] = False
+
+    @commands.hybrid_command(
+        name="hardreset",
+        description="Reset all the variables",
+    )
+    async def hardreset(self, context: Context) -> None:
+        """
+        Hard reset.
+
+        :param context: The application command context.
+        """
+        embed = discord.Embed(
+            description="Successfully reset.", color=0xE02B2B
+        )
+        await context.send(embed=embed)
+
+        guild_id = context.guild.id
+        voice_client = self.server_to_voice_client[guild_id]
+        if voice_client is not None:
+            await voice_client.disconnect()
+        self.server_to_voice_client[guild_id] = None
+        self.server_to_if_connected[guild_id] = False
+        self.server_to_text_input_channel[guild_id] = None
+        self.server_to_user_channel[guild_id] = None
+        self.server_to_audio_queue[guild_id] = asyncio.Queue()
+        self.server_to_if_playing[guild_id] = False
 
     @commands.hybrid_command(
         name="change",

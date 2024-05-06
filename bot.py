@@ -13,7 +13,6 @@ import logging
 import platform
 import random
 import requests
-import time
 from dotenv import load_dotenv
 
 import aiosqlite
@@ -23,12 +22,6 @@ from discord.ext.commands import Context
 
 from database import DatabaseManager
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-# from selenium.webdriver.common.keys import Keys
 
 if not os.path.isfile(f"{os.path.realpath(os.path.dirname(__file__))}/config.json"):
     sys.exit("'config.json' not found! Please add it and try again.")
@@ -105,8 +98,8 @@ class DiscordBot(commands.Bot):
         self.logger = logger
         self.config = config
         self.database = None
-        self.download_dir = os.getcwd() + "/download"  # exclusive to Hiroyuki
-        self.driver = None  # exclusive to Hiroyuki
+        self.download_dir = os.getcwd() + "/download"  # exclusive to Hiro
+        self.driver = None  # exclusive to Hiro
 
     async def init_db(self) -> None:
         async with aiosqlite.connect(
@@ -168,7 +161,6 @@ class DiscordBot(commands.Bot):
                 f"{os.path.realpath(os.path.dirname(__file__))}/database/database.db"
             )
         )
-        # self.hiroyuki_init()
 
         # check VOICEVOX connection
         try:
@@ -267,51 +259,6 @@ class DiscordBot(commands.Bot):
             await context.send(embed=embed)
         else:
             raise error
-
-    def hiroyuki_init(self) -> None:
-        """
-        This function initializes the Hiroyuki bot.
-        """
-        COEFONT_EMAIL = os.getenv("COEFONT_EMAIL")
-        COEFONT_PASSWORD = os.getenv("COEFONT_PASSWORD")
-
-        # Setup Chrome options
-        options = Options()
-        options.add_argument("--headless")
-        options.add_experimental_option("prefs", {
-            "download.default_directory": self.download_dir,  # Set the download folder
-        })
-
-        # Set path to chromedriver as a service
-        webdriver_service = Service(ChromeDriverManager().install())
-
-        # Set the driver
-        self.driver = webdriver.Chrome(service=webdriver_service, options=options)
-        self.logger.info("[HIROYUKI] Chromedriver activated")
-
-        # Log in
-        self.driver.get("https://coefont.cloud/login")
-        email_input = self.driver.find_element(By.XPATH, "/html/body/div/div/div[2]/div/div[1]/input")
-        email_input.send_keys(COEFONT_EMAIL)
-        password_input = self.driver.find_element(By.XPATH, "/html/body/div/div/div[2]/div/div[2]/input")
-        password_input.send_keys(COEFONT_PASSWORD)
-        self.driver.find_element(By.XPATH, "/html/body/div/div/div[3]/div[1]/div/button[1]").click()
-        time.sleep(5)  # log in
-        self.logger.info("[HIROYUKI] Successfully logged in")
-        self.driver.save_screenshot("img/screenshot1.png")
-        # Set up the project page
-        self.driver.get("https://coefont.cloud/editor/c02784bf-85c9-4d48-8f08-adf8365327cb")
-        time.sleep(5)
-        self.driver.save_screenshot("img/screenshot2.png")
-        time.sleep(5)
-        # for _ in range(3):
-        #     self.driver.find_element(By.XPATH, "/html/body/div/div[4]/div/div/button").click()  # rep 3 times
-        #     time.sleep(3)
-        # self.driver.save_screenshot(f"img/screenshot{3+_}.png")
-
-        self.driver.find_element(By.XPATH, "/html/body/div/div[1]/div/div[1]/div[4]/div").click()
-        self.driver.save_screenshot("img/screenshot6.png")
-        self.logger.info("[HIROYUKI] Successfully initialized input section")
 
 
 load_dotenv()
