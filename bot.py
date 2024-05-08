@@ -162,17 +162,17 @@ class DiscordBot(commands.Bot):
             )
         )
 
-        # check VOICEVOX connection
-        try:
-            test_url = os.getenv("NGROK_URL") + "/version"
-            response = requests.get(test_url)
-            if response.status_code == 200:
-                version = response.text.replace('"', '')
-                self.logger.info(f"Successfully connected to VOICEVOX (version {version}).")
-            else:
-                self.logger.warning("Failed to connect to VOICEVOX")
-        except Exception:
-            self.logger.warning("Failed to connect to VOICEVOX")
+        # check VOICEVOX API connection
+        # try:
+        #     test_url = os.getenv("NGROK_URL") + "/version"
+        #     response = requests.get(test_url)
+        #     if response.status_code == 200:
+        #         version = response.text.replace('"', '')
+        #         self.logger.info(f"Successfully connected to VOICEVOX (version {version}).")
+        #     else:
+        #         self.logger.warning("Failed to connect to VOICEVOX")
+        # except Exception:
+        #     self.logger.warning("Failed to connect to VOICEVOX")
 
         self.logger.info("Successfully setup the bot")
 
