@@ -202,7 +202,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
             return
         if message.content.startswith("/"):
             return
-        if message.content.startswith("https://") or message.content.startswith("http://"):
+        if "https://" in message.content or "http://" in message.content:
             return
         if message.content.startswith("*ig"):
             return
