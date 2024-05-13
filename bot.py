@@ -12,7 +12,7 @@ import json
 import logging
 import platform
 import random
-import requests
+# import requests
 from dotenv import load_dotenv
 
 import aiosqlite
