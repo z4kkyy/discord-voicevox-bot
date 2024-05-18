@@ -111,3 +111,4 @@ img/*
 custom_setting.json
 query_hist.txt
 *_past.py
+libonnxruntime.so.1.13.1
