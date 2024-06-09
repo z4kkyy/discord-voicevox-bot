@@ -155,7 +155,9 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 self.server_to_if_playing[guild_id] = False
 
                 # remove the previous audio file
-                os.remove(previous_path)
+
+                if not re.search(r'[^/]+$', previous_path).group().startswith("CUSTOMSTICKER"):
+                    os.remove(previous_path)
 
                 if not self.server_to_audio_queue[guild_id].empty():
                     next_audio_path = await self.server_to_audio_queue[guild_id].get()
