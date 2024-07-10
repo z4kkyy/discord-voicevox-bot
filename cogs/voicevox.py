@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import tempfile
 # import time
 from collections import defaultdict
@@ -22,6 +23,7 @@ from discord.ext import commands
 # from discord.ext import tasks
 from discord.ext.commands import Context
 from dotenv import load_dotenv
+from gtts import gTTS
 from voicevox_core import VoicevoxCore
 
 # from selenium.webdriver.common.by import By
@@ -146,12 +148,24 @@ class VoiceVox(commands.Cog, name="voicevox"):
             file_path = f.name
         return file_path
 
+    def _generate_audio_file_en(self, text: str) -> str:
+        """
+        Generates an audio file using the specified speaker.
+
+        :param text: The text to generate the audio file from.
+        """
+        tts = gTTS(text=text, lang='en-us')
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            tts.save(f.name)
+            file_path = f.name
+        return file_path
+
     def _create_after_callback(self, guild_id, previous_path) -> callable:
         # create recursive callback function
         def after_callback(error):
             async def play_next():
                 if error:
-                    print(f"Error: {error}")
+                    self.bot.logger.error(f"Error: {error}")
                 self.server_to_if_playing[guild_id] = False
 
                 # remove the previous audio file
@@ -162,7 +176,11 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 if not self.server_to_audio_queue[guild_id].empty():
                     next_audio_path = await self.server_to_audio_queue[guild_id].get()
                     self.server_to_if_playing[guild_id] = True
-                    source = discord.FFmpegPCMAudio(next_audio_path)
+                    ffmpeg_options = {
+                        'options': '-vn -ac 2',
+                        'stderr': subprocess.DEVNULL
+                    }
+                    source = discord.FFmpegPCMAudio(next_audio_path, **ffmpeg_options)
                     voice_client = self.server_to_voice_client[guild_id]
                     voice_client.play(source, after=self._create_after_callback(guild_id, next_audio_path))  # recursive call
                 else:
@@ -187,7 +205,12 @@ class VoiceVox(commands.Cog, name="voicevox"):
             await self.server_to_audio_queue[guild_id].put(path)
         else:
             self.server_to_if_playing[guild_id] = True
-            voice_client.play(discord.FFmpegPCMAudio(path), after=self._create_after_callback(guild_id, path))
+            ffmpeg_options = {
+                'options': '-vn -ac 2',
+                'stderr': subprocess.DEVNULL
+            }
+            source = discord.FFmpegPCMAudio(path, **ffmpeg_options)
+            voice_client.play(source, after=self._create_after_callback(guild_id, path))
 
     @commands.Cog.listener()
     async def on_message(self, message) -> None:
@@ -262,8 +285,11 @@ class VoiceVox(commands.Cog, name="voicevox"):
                     await self._add_to_queue(path=path, guild_id=message.guild.id)
             return
 
-        print(f'new message: {message_content!r}')
+        message_content = f"{message_content!r}"
+        message_content = re.sub('^.(.*).$', r'\1', message_content)
+        self.bot.logger.info(f'New input message: "{message_content}" (guild id: {guild_id})')
 
+        original_message_content = message_content
         # replace "w" with "わら"
         message_content = message_content.replace("w", "わら")
         message_content = message_content.replace("ｗ", "わら")
@@ -273,16 +299,19 @@ class VoiceVox(commands.Cog, name="voicevox"):
         message_content = re.sub(r"<@\d+>", "", message_content)
 
         # generate audio file
-        path = self._generate_audio_file(message_content, speaker_to_use)
-        print(f'successfully generated. path: {path}')
+        if re.search(r'[a-zA-Z]', message_content):
+            path = self._generate_audio_file_en(original_message_content)
+        else:
+            path = self._generate_audio_file(message_content, speaker_to_use)
+        self.bot.logger.info(f"Successfully generated. path: {path} (guild id: {guild_id})")
 
         try:
             await self._add_to_queue(path=path, guild_id=guild_id)
         except Exception as e:
-            print(f"Error during message handling: {e}")
+            self.bot.logger.error(f"Error during message handling: {e} (guild id: {guild_id})")
 
         # show logs
-        self.bot.logger.info(f"[VoiceVox] Input query text: '{message.content}' by {message.author}")
+        self.bot.logger.info(f'Preprocessed text: "{message.content}" by {message.author}  (guild id: {guild_id})')
         query_hist_path = str(Path(__file__).resolve().parent.parent) + "/query_hist.txt"
         with open(query_hist_path, 'a') as file:
             file.write(
@@ -303,10 +332,10 @@ class VoiceVox(commands.Cog, name="voicevox"):
             guild_id = member.guild.id
             if before.channel is not None and after.channel is None:
                 if self.server_to_expected_disconnection[guild_id]:
-                    print("Detected normal disconnection.")
+                    self.bot.logger.info("Detected normal disconnection.")
                     self.server_to_expected_disconnection[guild_id] = False
                 else:
-                    print("Detected unexpected disconnection. Check the close code.")
+                    self.bot.logger.info("Detected unexpected disconnection. Check the close code.")
                     # reconnect to the voice channel
                     self.server_to_voice_client[guild_id] = await before.channel.connect()
 
