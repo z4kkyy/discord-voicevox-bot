@@ -299,7 +299,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
         message_content = re.sub(r"<@\d+>", "", message_content)
 
         # generate audio file
-        if re.search(r'[a-zA-Z]', message_content):
+        if re.match(r'^[^\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]+$', message_content):
             path = self._generate_audio_file_en(original_message_content)
         else:
             path = self._generate_audio_file(message_content, speaker_to_use)
