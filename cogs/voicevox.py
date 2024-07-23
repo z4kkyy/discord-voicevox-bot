@@ -244,6 +244,8 @@ class VoiceVox(commands.Cog, name="voicevox"):
         with open(json_path, "r") as file:
             custom_setting = json.load(file)
 
+        original_message_content = message_content
+
         #  get custom setting dict. key: emoji_id, sticker_id, author_id
         custom_emoji = {int(key): val for key, val in custom_setting.get("custom_emoji").items()}
         custom_sticker = {int(key): val for key, val in custom_setting.get("custom_sticker").items()}
@@ -289,7 +291,6 @@ class VoiceVox(commands.Cog, name="voicevox"):
         message_content = re.sub('^.(.*).$', r'\1', message_content)
         self.bot.logger.info(f'New input message: "{message_content}" (guild id: {guild_id})')
 
-        original_message_content = message_content
         # replace "w" with "わら"
         message_content = message_content.replace("w", "わら")
         message_content = message_content.replace("ｗ", "わら")
@@ -299,7 +300,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
         message_content = re.sub(r"<@\d+>", "", message_content)
 
         # generate audio file
-        if re.match(r'^[^\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]+$', message_content):
+        if bool(re.match(r'^[^\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]+$', original_message_content)) and not bool(re.fullmatch(r'[wW]+', original_message_content)):
             path = self._generate_audio_file_en(original_message_content)
         else:
             path = self._generate_audio_file(message_content, speaker_to_use)
