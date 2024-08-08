@@ -289,6 +289,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
 
         message_content = f"{message_content!r}"
         message_content = re.sub('^.(.*).$', r'\1', message_content)
+
         self.bot.logger.info(f'New input message: "{message_content}" (guild id: {guild_id})')
 
         # replace "w" with "わら"
@@ -298,7 +299,10 @@ class VoiceVox(commands.Cog, name="voicevox"):
         message_content = re.sub(r'笑+$', lambda m: 'わら' * len(m.group()), message_content)
         # remove user mentions
         message_content = re.sub(r"<@\d+>", "", message_content)
+        message_content = message_content.replace("\\u3000", " ")
+        message_content = message_content.replace("\\n", " ")
 
+        print(message_content)
         # generate audio file
         if (bool(re.match(r'^[^\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]+$', original_message_content))
                 and not bool(re.fullmatch(r'[wW]+', original_message_content))
@@ -314,7 +318,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
             self.bot.logger.error(f"Error during message handling: {e} (guild id: {guild_id})")
 
         # show logs
-        self.bot.logger.info(f'Preprocessed text: "{message.content}" by {message.author}  (guild id: {guild_id})')
+        self.bot.logger.info(f'Preprocessed text: "{message_content}" by {message.author}  (guild id: {guild_id})')
         query_hist_path = str(Path(__file__).resolve().parent.parent) + "/query_hist.txt"
         with open(query_hist_path, 'a') as file:
             file.write(
