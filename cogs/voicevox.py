@@ -244,6 +244,13 @@ class VoiceVox(commands.Cog, name="voicevox"):
         with open(json_path, "r") as file:
             custom_setting = json.load(file)
 
+        # remove user mentions
+        message_content = re.sub(r"<@\d+>", "", message_content)
+        message_content = message_content.replace("\\u3000", " ")
+        message_content = message_content.replace("\\n", " ")
+        # remove emojis
+        message_content = re.sub(r'<:.+:\d+>', "", message_content)
+
         original_message_content = message_content
 
         #  get custom setting dict. key: emoji_id, sticker_id, author_id
@@ -295,17 +302,14 @@ class VoiceVox(commands.Cog, name="voicevox"):
         # replace "w" with "わら"
         message_content = message_content.replace("w", "わら")
         message_content = message_content.replace("ｗ", "わら")
+        message_content = message_content.replace("W", "わら")
         # replace successive "笑" in the end with "わら"
         message_content = re.sub(r'笑+$', lambda m: 'わら' * len(m.group()), message_content)
-        # remove user mentions
-        message_content = re.sub(r"<@\d+>", "", message_content)
-        message_content = message_content.replace("\\u3000", " ")
-        message_content = message_content.replace("\\n", " ")
 
         print(message_content)
         # generate audio file
         if (bool(re.match(r'^[^\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]+$', original_message_content))
-                and not bool(re.fullmatch(r'[wW]+', original_message_content))
+                and not bool(re.fullmatch(r'[wWｗ]+', original_message_content))
                 and not bool(re.fullmatch(r'[\uFF61-\uFF9F]+', original_message_content))):
             path = self._generate_audio_file_en(original_message_content)
         else:
