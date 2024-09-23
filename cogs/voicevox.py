@@ -1,4 +1,4 @@
-""""
+"""
 Copyright © Krypton 2019-2023 - https://github.com/kkrypt0nn (https://krypton.ninja)
 
 Version: 6.1.0
@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tempfile
+import unicodedata
 # import time
 from collections import defaultdict
 from datetime import datetime
@@ -169,7 +170,6 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 self.server_to_if_playing[guild_id] = False
 
                 # remove the previous audio file
-
                 if not re.search(r'[^/]+$', previous_path).group().startswith("CUSTOMSTICKER"):
                     os.remove(previous_path)
 
@@ -246,11 +246,23 @@ class VoiceVox(commands.Cog, name="voicevox"):
 
         # remove user mentions
         message_content = re.sub(r"<@\d+>", "", message_content)
-        message_content = message_content.replace("\\u3000", " ")
-        message_content = message_content.replace("\\n", " ")
-        # remove emojis
-        message_content = re.sub(r'<:.+:\d+>', "", message_content)
+        message_content = message_content.replace("\u3000", " ")
+        message_content = message_content.replace("\n", " ")
+        message_content = re.sub(r'\s+', ' ', message_content)
 
+        # remove emojis
+        def is_emoji(char):
+            return unicodedata.category(char) in ['So', 'Sk', 'Sm', 'Cn']
+
+        def clean_emoji(message_content):
+            custom_emoji_pattern = re.compile(r'<a?:.+?:\d+>')
+            message_content = custom_emoji_pattern.sub('', message_content)
+
+            cleaned_content = ''.join(c for c in message_content if not is_emoji(c))
+
+            return cleaned_content
+
+        message_content = clean_emoji(message_content)
         original_message_content = message_content
 
         #  get custom setting dict. key: emoji_id, sticker_id, author_id
