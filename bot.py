@@ -6,6 +6,7 @@ Version: 6.1.0
 Modified by z4kky - https://github.com/z4kkyy
 """
 
+import ctypes
 import os
 import sys
 import json
@@ -14,6 +15,7 @@ import platform
 import random
 # import requests
 from dotenv import load_dotenv
+from pathlib import Path
 
 import aiosqlite
 import discord
@@ -100,6 +102,13 @@ class DiscordBot(commands.Bot):
         self.database = None
         self.download_dir = os.getcwd() + "/download"  # exclusive to Hiro
         self.driver = None  # exclusive to Hiro
+
+        lib_path = Path(__file__).parent / "onnxruntime-linux-x64-1.13.1/lib"
+        print(lib_path)
+        try:
+            ctypes.CDLL(str(lib_path) + "/libonnxruntime.so.1.13.1")
+        except Exception as e:
+            print(f"Failed to load library: {e}")
 
     async def init_db(self) -> None:
         async with aiosqlite.connect(

@@ -89,7 +89,12 @@ class VoiceVox(commands.Cog, name="voicevox"):
         self.server_to_expected_disconnection = defaultdict(lambda: False)  # for unexpected disconnection
         self.POST_URL = os.getenv("NGROK_URL")
 
-        self.JTALK_DICT_DIR = os.path.realpath(os.path.expanduser("~/open_jtalk_dic_utf_8-1.11"))
+        lib_path = Path(__file__).parent.parent / "onnxruntime-linux-x64-1.13.1/lib"
+        # Set environment variables
+        os.environ['LD_LIBRARY_PATH'] = f"{lib_path}:{os.environ.get('LD_LIBRARY_PATH', '')}"
+        os.environ['ONNXRUNTIME_PROVIDERS_PATH'] = str(lib_path)
+
+        self.JTALK_DICT_DIR = Path(__file__).parent.parent.absolute() / "open_jtalk_dic_utf_8-1.11"
         self.voicevox_core = VoicevoxCore(open_jtalk_dict_dir=self.JTALK_DICT_DIR)
         self.voicevox_core.load_model(3)
 
