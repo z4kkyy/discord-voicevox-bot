@@ -181,13 +181,14 @@ class VoiceVox(commands.Cog, name="voicevox"):
                 if not self.server_to_audio_queue[guild_id].empty():
                     next_audio_path = await self.server_to_audio_queue[guild_id].get()
                     self.server_to_if_playing[guild_id] = True
-                    ffmpeg_options = {
-                        'options': '-vn -ac 2',
-                        'stderr': subprocess.DEVNULL
-                    }
-                    source = discord.FFmpegPCMAudio(next_audio_path, **ffmpeg_options)
-                    voice_client = self.server_to_voice_client[guild_id]
-                    voice_client.play(source, after=self._create_after_callback(guild_id, next_audio_path))  # recursive call
+                    with open(os.devnull, 'wb') as devnull:
+                        ffmpeg_options = {
+                            'options': '-vn -ac 2',
+                            'stderr': devnull
+                        }
+                        source = discord.FFmpegPCMAudio(next_audio_path, **ffmpeg_options)
+                        voice_client = self.server_to_voice_client[guild_id]
+                        voice_client.play(source, after=self._create_after_callback(guild_id, next_audio_path))  # recursive call
                 else:
                     pass
 
@@ -210,12 +211,13 @@ class VoiceVox(commands.Cog, name="voicevox"):
             await self.server_to_audio_queue[guild_id].put(path)
         else:
             self.server_to_if_playing[guild_id] = True
-            ffmpeg_options = {
-                'options': '-vn -ac 2',
-                'stderr': subprocess.DEVNULL
-            }
-            source = discord.FFmpegPCMAudio(path, **ffmpeg_options)
-            voice_client.play(source, after=self._create_after_callback(guild_id, path))
+            with open(os.devnull, 'wb') as devnull:
+                ffmpeg_options = {
+                    'options': '-vn -ac 2',
+                    'stderr': devnull
+                }
+                source = discord.FFmpegPCMAudio(path, **ffmpeg_options)
+                voice_client.play(source, after=self._create_after_callback(guild_id, path))
 
     @commands.Cog.listener()
     async def on_message(self, message) -> None:
@@ -323,7 +325,7 @@ class VoiceVox(commands.Cog, name="voicevox"):
         # replace successive "笑" in the end with "わら"
         message_content = re.sub(r'笑+$', lambda m: 'わら' * len(m.group()), message_content)
 
-        print(message_content)
+        # print(message_content)
         # generate audio file
         if (bool(re.match(r'^[^\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]+$', original_message_content))
                 and not bool(re.fullmatch(r'[wWｗ]+', original_message_content))
