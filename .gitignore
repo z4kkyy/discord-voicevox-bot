@@ -111,4 +111,5 @@ img/*
 custom_setting.json
 query_hist.txt
 *_past.py
-libonnxruntime.so.1.13.1
+onnxruntime-linux-x64-1.13.1/
+open_jtalk_dic_utf_8-1.11/
