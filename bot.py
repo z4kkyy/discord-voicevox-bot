@@ -104,7 +104,7 @@ class DiscordBot(commands.Bot):
         self.driver = None  # exclusive to Hiro
 
         lib_path = Path(__file__).parent / "onnxruntime-linux-x64-1.13.1/lib"
-        print(lib_path)
+        # print(lib_path)
         try:
             ctypes.CDLL(str(lib_path) + "/libonnxruntime.so.1.13.1")
         except Exception as e:
